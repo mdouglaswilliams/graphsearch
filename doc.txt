@@ -1,0 +1,230 @@
+Graph Search
+Version 1.0
+
+  The Graph Search module provides a simple rule language and graph search
+procedure for solving state space problems.
+
+--- Rule Language ---
+
+  A ruleset is a set of rules that together provide a state space search.  A
+ruleset is defined as follows:
+
+  (define-ruleset <ruleset-name>)
+
+  A rule is a precondition / action pair.  The precondition is an expression
+that is evaluated for a state.  If the result is #t, then the rule action can be
+applies to that state.  A rule is defined as follows:
+
+  (define-rule (<rule-name> <ruleset-name>) arguments
+    precondition
+    ==>
+    action)
+
+where arguments is the argument list for both the precondition and action and
+must be a list with a single identifier, which will be bound to the state.
+
+--- Graph Search ---
+
+  The graphsearch procedure has the following arguments:
+
+    - initial-state   - the initial state of the problem
+    - goal?           - a predicate function that returns #t if a state is a
+                        goal state and #f otherwise
+    - ruleset-name    - the name of the ruleset to use
+    - value           - a function of two arguments, state and node-cost (the
+                        current cost to that state), and computes the heuristic
+                        value for the cost of solution constrained to go
+                        through that node
+    - sort-new-nodes? - #t if new nodes are sorted (by node-value) prior to
+                        being merged onto the open list
+    - merge-method    - one of 'prepend 'append 'merge - specifies the method
+                        used to add new nodes to the open list
+
+--- Usage ---
+
+  A typical use of the Graph Search:
+
+  1) Define the state space representation.  Choose a suitable Scheme
+     representation (e.g. list, vector, structure, etc.) for each state.  It
+     is also useful to define semantically meaningful routines to access
+     elements of the state and to construct new states.  This will make the
+     rules easier to write and understand.
+
+  2) Define the ruleset.  Give the ruleset a meaningful name.
+
+  3) Define the rules.  Use the respresentation and routines from step #1.
+
+  4) Define goal and value functions.  These functions are an integral part
+     of the state space search.  The value function is used to define heuristic
+     searches.  For naive searches, the procedure (lambda (state cost) cost)
+     just assigns the cost to the node as the node cost.  Note that these
+     functions may be included in the top-level function in step #5.
+
+  5) Construct a top-level function to initiate the graph search.  The
+     arguments to the graphsearch procedure are complex and its much easier to
+     develop a top-level function to make it easier.
+
+--- Example ---
+
+;; Towers of Hanoi Representation
+;;
+;; Each state in the Towers of Hanoi problem is represented as a list 
+;; of three sublists.  Each sublist represents the disks on the 
+;; corresponding needle in the state, For example:
+;;
+;;        |        |        |    
+;;       =|=       |        |    
+;;      ==|==      |        |    
+;;     ===|===     |        |    
+;;   -----------------------------
+;;
+;; is represented as
+;;
+;;   ((1 2 3)()())
+;;
+;; We define the following Scheme functions to construct and manipulate
+;; these states:
+;;
+;; new-towers-state  constructs a new state given the contents of the
+;;                   three needles; the same as the function list
+;; left              returns the contents of the left needle; the same
+;;                   as the function car
+;; middle            returns the contents of the middle needle; the
+;;                   same as the function cadr
+;; right             returns the contents of the right needle: the 
+;;                   same as the function caddr
+;; stack             returns a new stack with the given disk on top of
+;;                   a stack of disks; the same as the function cons
+;; rest              returns the rest of the disks after the top on on
+;;                   stack of disks; the same as the function cdr
+;; empty?            predicate function that returns #t if a stack of
+;;                   disks is empty; the same as the function null?
+;; smaller?          predicate function that returns #t if the first
+;;                   disk is smaller than the second disk; the same as
+;;                   the function <
+
+(require (planet "graphsearch.ss" ("williams" "graphsearch.plt" 1 0)))
+
+(define new-towers-state list)
+(define left car)
+(define middle cadr)
+(define right caddr)
+(define stack cons)
+(define top car)
+(define rest cdr)
+(define empty? null?)
+(define smaller? <)
+
+;; Rule set
+;;
+;; These are the rule to generate the search graph for the Towers of
+;; Hnoi problem.  There are six rules corresponding to legal moves.
+;;
+;;   move-left-to-middle
+;;   move-left-to-right
+;;   move-middle-to-left
+;;   move-middle-to-right
+;;   move-right-to-left
+;;   move-right-to-middle
+;;
+;; The preconditions for each of these rules prevents an application of
+;; the rules that would produce illegal states.
+
+(define-ruleset towers-rules)
+
+;;; Move the top disk from the left needle to the middle needle
+(define-rule (move-left-to-middle towers-rules) (state)
+  (and (not (empty? (left state)))
+       (or (empty? (middle state))
+           (smaller? (top (left state))
+                     (top (middle state)))))
+  ==>
+  (new-towers-state
+   (rest (left state))
+   (stack (top (left state)) (middle state))
+   (right state)))
+
+;;; Move the top disk from the left needle to the right needle
+(define-rule (move-left-to-right towers-rules) (state)
+  (and (not (empty? (left state)))
+       (or (empty? (right state))
+           (smaller? (top (left state))
+                     (top (right state)))))
+  ==>
+  (new-towers-state
+   (rest (left state))
+   (middle state)
+   (stack (top (left state)) (right state))))
+
+;;; Move the top disk from the middle needle to the left needle
+(define-rule (move-middle-to-left towers-rules) (state)
+  (and (not (empty? (middle state)))
+       (or (empty? (left state))
+           (smaller? (top (middle state))
+                     (top (left state)))))
+  ==>
+  (new-towers-state
+   (stack (top (middle state)) (left state))
+   (rest (middle state))
+   (right state)))
+
+;;; Move the top disk from the middle needle to the right needle
+(define-rule (move-middle-to-right towers-rules) (state)
+  (and (not (empty? (middle state)))
+       (or (empty? (right state))
+           (smaller? (top (middle state))
+                     (top (right state)))))
+  ==>
+  (new-towers-state
+   (left state)
+   (rest (middle state))
+   (stack (top (middle state)) (right state))))
+
+;;; Move the top disk from the right needle to the left needle
+(define-rule (move-right-to-left towers-rules) (state)
+  (and (not (empty? (right state)))
+       (or (empty? (left state))
+           (smaller? (top (right state))
+                     (top (left state)))))
+  ==>
+  (new-towers-state
+   (stack (top (right state)) (left state))
+   (middle state)
+   (rest (right state))))
+
+;;; Move the top disk from the right needle to the middle needle
+(define-rule (move-right-to-middle towers-rules) (state)
+  (and (not (empty? (right state)))
+       (or (empty? (middle state))
+           (smaller? (top (right state))
+                     (top (middle state)))))
+  ==>
+  (new-towers-state
+   (left state)
+   (stack (top (right state)) (middle state))
+   (rest (right state))))
+
+;; Top-level Search Function
+;;
+;; This is the top-level search routine for the Towers of Hanoi
+;; problem.  It calls the graph-search procedure with the appropriate
+;; arguments, prints the states in the solution, and prints the
+;; statistics for the search graph.
+
+(define (towers-search initial-state goal-state merge-method)
+  (define (towers-value state cost)
+    cost)
+  (define (goal? state)
+    (equal? state goal-state))
+  (let ((solution 
+         (graph-search initial-state goal? 'towers-rules
+                       towers-value #t merge-method)))
+    (if solution
+        (begin
+          (printf "Solution:~n")
+          (for-each
+           (lambda (state)
+             (printf "~a~n" state))
+           solution))
+        (printf "No solution found~n")))
+  (graph-statistics))
